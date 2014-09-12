@@ -23,7 +23,7 @@ import java.util.List;
  */
 public class WordNetSense extends Sense {
 
-    private Synset synset;
+    private final Synset synset;
 
     /**
      * Constructs an instance linked to a synset.
@@ -40,7 +40,7 @@ public class WordNetSense extends Sense {
     }
 
     public List<String> getLemmas() {
-        List<String> out = new ArrayList<String>();
+        List<String> out = new ArrayList<>();
 
         for (int i = 0; i < synset.getWords().size(); i++) {
             out.add(synset.getWords().get(i).getLemma());
@@ -54,7 +54,7 @@ public class WordNetSense extends Sense {
     }
 
     public List<ISense> getParents(int depth) throws LinguisticOracleException {
-        List<ISense> out = new ArrayList<ISense>();
+        List<ISense> out = new ArrayList<>();
         try {
             // TODO check the casts
             PointerTargetTree hypernyms = PointerUtils.getHypernymTree(synset, depth);
@@ -79,7 +79,7 @@ public class WordNetSense extends Sense {
     }
 
     public List<ISense> getChildren(int depth) throws LinguisticOracleException {
-        List<ISense> out = new ArrayList<ISense>();
+        List<ISense> out = new ArrayList<>();
         try {
             // TODO check the casts
             PointerTargetTree hypernyms = PointerUtils.getHyponymTree(synset, depth);

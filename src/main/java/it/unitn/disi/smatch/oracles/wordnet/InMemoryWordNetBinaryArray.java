@@ -1,9 +1,6 @@
 package it.unitn.disi.smatch.oracles.wordnet;
 
 import it.unitn.disi.common.DISIException;
-import it.unitn.disi.common.components.Configurable;
-import it.unitn.disi.common.components.ConfigurableException;
-import it.unitn.disi.common.components.ConfigurationKeyMissingException;
 import it.unitn.disi.common.utils.MiscUtils;
 import it.unitn.disi.smatch.SMatchException;
 import it.unitn.disi.smatch.data.ling.ISense;
@@ -15,73 +12,49 @@ import net.sf.extjwnl.data.list.PointerTargetNode;
 import net.sf.extjwnl.data.list.PointerTargetNodeList;
 import net.sf.extjwnl.data.list.PointerTargetTree;
 import net.sf.extjwnl.dictionary.Dictionary;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.util.*;
 
 /**
  * Implements version of WN matcher which use a fast internal data structure.
- * <p/>
- * Needs several string configuration parameters pointing to files with cache. See default S-Match configuration
- * file for examples.
- * <p/>
- * Accepts loadArray boolean configuration parameter which allows to skip loading arrays into memory.
- * By default equals true, it is useful during generation of WordNet caches when it should be set to false.
+ * Contains routines for generating such structures.
  *
  * @author Mikalai Yatskevich mikalai.yatskevich@comlab.ox.ac.uk
  * @author <a rel="author" href="http://autayeu.com/">Aliaksandr Autayeu</a>
  */
-public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMatcher {
+public class InMemoryWordNetBinaryArray implements ISenseMatcher {
 
-    private static final Logger log = Logger.getLogger(InMemoryWordNetBinaryArray.class);
+    private static final Logger log = LoggerFactory.getLogger(InMemoryWordNetBinaryArray.class);
 
-    // configuration keys for WordNet cache files
-    private static final String ADJ_SYN_KEY = "adjectiveSynonymFile";
-    private static final String ADJ_ANT_KEY = "adjectiveAntonymFile";
-    private static final String NOUN_MG_KEY = "nounMGFile";
-    private static final String NOUN_ANT_KEY = "nounAntonymFile";
-    private static final String VERB_MG_KEY = "verbMGFile";
-    private static final String NOMINALIZATION_KEY = "nominalizationsFile";
-    private static final String ADV_ANT_KEY = "adverbsAntonymFile";
+    // arrays with WordNet keys
+    private final long[] adj_syn;
+    private final long[] adj_opp;
+    private final long[] noun_mg;
+    private final long[] noun_opp;
+    private final long[] adv_opp;
+    private final long[] verb_mg;
+    private final long[] nominalizations;
 
-    private static final String JWNL_PROPERTIES_PATH_KEY = "JWNLPropertiesPath";
-
-    // controls loading of arrays, used to skip loading before conversion
-    private static final String LOAD_ARRAYS_KEY = "loadArrays";
-
-    // array with WordNet keys
-    private long[] adj_syn = null;
-    private long[] adj_opp = null;
-    private long[] noun_mg = null;
-    private long[] noun_opp = null;
-    private long[] adv_opp = null;
-    private long[] verb_mg = null;
-    private long[] nominalizations = null;
-
-    @Override
-    public boolean setProperties(Properties newProperties) throws ConfigurableException {
-        boolean result = super.setProperties(newProperties);
-        if (result) {
-            boolean loadArrays = true;
-            if (newProperties.containsKey(LOAD_ARRAYS_KEY)) {
-                loadArrays = Boolean.parseBoolean(newProperties.getProperty(LOAD_ARRAYS_KEY));
-            }
-
-            if (loadArrays) {
-                log.info("Loading WordNet cache to memory...");
-                adj_syn = readArray(newProperties, ADJ_SYN_KEY, "adjective synonyms");
-                adj_opp = readArray(newProperties, ADJ_ANT_KEY, "adjective antonyms");
-                noun_mg = readArray(newProperties, NOUN_MG_KEY, "noun hypernyms");
-                noun_opp = readArray(newProperties, NOUN_ANT_KEY, "noun antonyms");
-                verb_mg = readArray(newProperties, VERB_MG_KEY, "verb hypernyms");
-                adv_opp = readArray(newProperties, ADV_ANT_KEY, "adverb antonyms");
-                nominalizations = readArray(newProperties, NOMINALIZATION_KEY, "nominalizations");
-                log.info("Loaded WordNet cache to memory");
-            }
-        }
-        return result;
+    public InMemoryWordNetBinaryArray(
+            String adjectiveSynonyms,
+            String adjectiveAntonyms,
+            String nounHypernyms,
+            String nounAntonyms,
+            String adverbAntonyms,
+            String verbHypernyms,
+            String nominalizations
+    ) throws SMatchException {
+        log.info("Loading WordNet cache to memory...");
+        this.adj_syn = readArray(adjectiveSynonyms, "adjective synonyms");
+        this.adj_opp = readArray(adjectiveAntonyms, "adjective antonyms");
+        this.noun_mg = readArray(nounHypernyms, "noun hypernyms");
+        this.noun_opp = readArray(nounAntonyms, "noun antonyms");
+        this.verb_mg = readArray(verbHypernyms, "verb hypernyms");
+        this.adv_opp = readArray(adverbAntonyms, "adverb antonyms");
+        this.nominalizations = readArray(nominalizations, "nominalizations");
+        log.info("Loaded WordNet cache to memory");
     }
 
     public char getRelation(List<ISense> sourceSenses, List<ISense> targetSenses) {
@@ -198,14 +171,9 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
         return false;
     }
 
-    private static long[] readArray(Properties properties, String key, String name) throws ConfigurableException {
-        long[] result;
-        if (properties.containsKey(key)) {
-            result = readHash(properties.getProperty(key));
-            log.debug("Read " + name + ": " + result.length);
-        } else {
-            throw new ConfigurationKeyMissingException(key);
-        }
+    private static long[] readArray(String fileName, String name) throws SMatchException {
+        long[] result = readHash(fileName);
+        log.debug("Read " + name + ": " + result.length);
         return result;
     }
 
@@ -251,61 +219,63 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
     /**
      * Create caches of WordNet to speed up matching.
      *
-     * @param componentKey a key to the component in the configuration
-     * @param properties   configuration
+     * @param jwnlPropertiesPath extJWNL properties file path
+     * @param adjectiveSynonyms  adjective synonyms file path
+     * @param adjectiveAntonyms  adjective antonyms file path
+     * @param nounHypernyms      noun hypernyms file path
+     * @param nounAntonyms       noun antonyms file path
+     * @param adverbAntonyms     adverb antonyms file path
+     * @param verbHypernyms      verb hypernyms file path
+     * @param nominalizations    nominalizations file path
      * @throws SMatchException SMatchException
      */
-    public static void createWordNetCaches(String componentKey, Properties properties) throws SMatchException {
-        properties = getComponentProperties(makeComponentPrefix(componentKey, InMemoryWordNetBinaryArray.class.getSimpleName()), properties);
-
-        Dictionary dic;
-
-        try {
-            if (properties.containsKey(JWNL_PROPERTIES_PATH_KEY)) {
-                String configPath = properties.getProperty(JWNL_PROPERTIES_PATH_KEY);
-                log.info("Initializing extJWNL (" + configPath + ")");
-
-                InputStream is = MiscUtils.getInputStream(configPath);
-                try {
-                    dic = Dictionary.getInstance(is);
-                } finally {
-                    if (null != is) {
-                        is.close();
-                    }
-                }
-            } else {
-                log.info("Initializing extJWNL (default resource instance)");
-                dic = Dictionary.getDefaultResourceInstance();
-            }
-        } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (IOException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        }
+    public static void createWordNetCaches(String jwnlPropertiesPath,
+                                           String adjectiveSynonyms,
+                                           String adjectiveAntonyms,
+                                           String nounHypernyms,
+                                           String nounAntonyms,
+                                           String adverbAntonyms,
+                                           String verbHypernyms,
+                                           String nominalizations
+    ) throws SMatchException {
+        Dictionary dic = WordNet.getDictionary(jwnlPropertiesPath);
 
         log.info("Creating WordNet caches...");
-        writeNominalizations(dic, properties);
-        writeSynonymsAdj(dic, properties);
-        writeOppAdverbs(dic, properties);
-        writeOppAdjectives(dic, properties);
-        writeOppNouns(dic, properties);
-        writeNounMG(dic, properties);
-        writeVerbMG(dic, properties);
+        convertAndWrite(findNominalizations(dic), nominalizations);
+        convertAndWrite(findAdjectiveSynonyms(dic), adjectiveSynonyms);
+        convertAndWrite(findAdverbAntonyms(dic), adverbAntonyms);
+        convertAndWrite(findAdjectiveAntonyms(dic), adjectiveAntonyms);
+        convertAndWrite(findNounAntonyms(dic), nounAntonyms);
+        convertAndWrite(findNounHypernyms(dic), nounHypernyms);
+        convertAndWrite(findVerbHypernyms(dic), verbHypernyms);
         log.info("Created WordNet caches");
     }
 
-    private static void writeNominalizations(Dictionary dic, Properties properties) throws SMatchException {
-        log.info("Creating nominalizations array...");
-        HashSet<Long> keys = new HashSet<Long>();
-        int count = 0;
+    private static void convertAndWrite(Set<Long> keys, String fileName) throws SMatchException {
         try {
+            long[] keysArr = new long[keys.size()];
+            int i = 0;
+            for (Long key : keys) {
+                keysArr[i] = key;
+                i++;
+            }
+            Arrays.sort(keysArr);
+            MiscUtils.writeObject(keysArr, fileName);
+        } catch (DISIException e) {
+            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
+        }
+    }
+
+    private static Set<Long> findNominalizations(Dictionary dic) throws SMatchException {
+        log.info("Creating nominalizations array...");
+        try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.VERB);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 1000) {
-                    log.info(count);
+                    log.debug("nominalizations: " + count);
                 }
                 Synset source = it.next();
                 List<Pointer> pointers = source.getPointers(PointerType.DERIVATION);
@@ -318,32 +288,22 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
                 }
             }
             log.info("Nominalizations: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(NOMINALIZATION_KEY));
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeSynonymsAdj(Dictionary dic, Properties properties) throws SMatchException {
+    private static Set<Long> findAdjectiveSynonyms(Dictionary dic) throws SMatchException {
         log.info("Creating adjective synonyms array...");
-        HashSet<Long> keys = new HashSet<Long>();
-        int count = 0;
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.ADJECTIVE);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 1000) {
-                    log.info(count);
+                    log.debug("adjective synonyms: " + count);
                 }
                 Synset source = it.next();
                 long sourceOffset = source.getOffset();
@@ -359,34 +319,23 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
                     keys.add(key);
                 }
             }
-            log.info("Adjective Synonyms: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(ADJ_SYN_KEY));
+            log.info("Adjective synonyms: " + keys.size());
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeOppAdverbs(Dictionary dic, Properties properties) throws SMatchException {
+    private static Set<Long> findAdverbAntonyms(Dictionary dic) throws SMatchException {
         log.info("Creating adverb antonyms array...");
-        HashSet<Long> keys = new HashSet<Long>();
-
-        int count = 0;
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.ADVERB);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 1000) {
-                    log.info(count);
+                    log.debug("adverb antonyms: " + count);
                 }
                 Synset source = it.next();
                 long sourceOffset = source.getOffset();
@@ -403,66 +352,44 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
                 }
             }
             log.info("Adverbs antonyms: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(ADV_ANT_KEY));
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeOppAdjectives(Dictionary dic, Properties properties) throws SMatchException {
+    private static Set<Long> findAdjectiveAntonyms(Dictionary dic) throws SMatchException {
         log.info("Creating adjective antonyms array...");
-        HashSet<Long> keys = new HashSet<Long>();
-
-        int count = 0;
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.ADJECTIVE);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 1000) {
-                    log.info(count);
+                    log.debug("adjective antonyms: " + count);
                 }
                 Synset current = it.next();
                 traverseTree(keys, PointerUtils.getExtendedAntonyms(current), current.getOffset());
                 traverseListSym(keys, PointerUtils.getAntonyms(current), current.getOffset());
             }
             log.info("Adjective antonyms: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(ADJ_ANT_KEY));
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeOppNouns(Dictionary dic, Properties properties) throws SMatchException {
+    private static Set<Long> findNounAntonyms(Dictionary dic) throws SMatchException {
         log.info("Creating noun antonyms array...");
-        HashSet<Long> keys = new HashSet<Long>();
-
-        int count = 0;
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.NOUN);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 10000) {
-                    log.info(count);
+                    log.debug("noun antonyms: " + count);
                 }
                 Synset source = it.next();
 
@@ -472,33 +399,22 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
             }
 
             log.info("Noun antonyms: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(NOUN_ANT_KEY));
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeNounMG(Dictionary dic, Properties properties) throws SMatchException {
-        log.info("Creating noun mg array...");
-        HashSet<Long> keys = new HashSet<Long>();
-
-        int count = 0;
+    private static Set<Long> findNounHypernyms(Dictionary dic) throws SMatchException {
+        log.info("Creating noun hypernyms array...");
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.NOUN);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 10000) {
-                    log.info(count);
+                    log.debug("noun hypernyms: " + count);
                 }
                 Synset source = it.next();
                 long sourceOffset = source.getOffset();
@@ -512,57 +428,36 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
                 traverseListMG(keys, PointerUtils.getPartHolonyms(source), sourceOffset);
                 traverseListMG(keys, PointerUtils.getSubstanceHolonyms(source), sourceOffset);
             }
-            log.info("Noun mg: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(NOUN_MG_KEY));
+            log.info("Noun hypernyms: " + keys.size());
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void writeVerbMG(Dictionary dic, Properties properties) throws SMatchException {
-        log.info("Creating verb mg array...");
-        HashSet<Long> keys = new HashSet<Long>();
-
-        int count = 0;
+    private static Set<Long> findVerbHypernyms(Dictionary dic) throws SMatchException {
+        log.info("Creating verb hypernyms array...");
         try {
+            Set<Long> keys = new HashSet<>();
+            int count = 0;
             Iterator<Synset> it = dic.getSynsetIterator(POS.VERB);
             while (it.hasNext()) {
                 count++;
                 if (0 == count % 1000) {
-                    log.info(count);
+                    log.debug("verb hypernyms: " + count);
                 }
                 Synset source = it.next();
                 long sourceOffset = source.getOffset();
                 traverseTreeMG(keys, PointerUtils.getHypernymTree(source), sourceOffset);
             }
-            log.info("Verb mg: " + keys.size());
-
-            long[] keysArr = new long[keys.size()];
-            int i = 0;
-            for (Long key : keys) {
-                keysArr[i] = key;
-                i++;
-            }
-            Arrays.sort(keysArr);
-            MiscUtils.writeObject(keysArr, properties.getProperty(VERB_MG_KEY));
+            log.info("Verb hypernyms: " + keys.size());
+            return keys;
         } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
             throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
     }
 
-    private static void cartPr(HashSet<Long> keys, List<Pointer> t) throws JWNLException {
+    private static void cartPr(Set<Long> keys, List<Pointer> t) throws JWNLException {
         for (int i = 0; i < t.size(); i++) {
             Pointer ps = t.get(i);
             long sourceOffset = ps.getTargetSynset().getOffset();
@@ -582,7 +477,7 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
         }
     }
 
-    private static void traverseListMG(HashSet<Long> keys, PointerTargetNodeList pointers, long sourceOffset) {
+    private static void traverseListMG(Set<Long> keys, PointerTargetNodeList pointers, long sourceOffset) {
         for (Object pointer : pointers) {
             long targetOffset = ((PointerTargetNode) pointer).getSynset().getOffset();
             if (sourceOffset != targetOffset) {
@@ -592,7 +487,7 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
         }
     }
 
-    private static void traverseListSym(HashSet<Long> keys, PointerTargetNodeList pointers, long sourceOffset) {
+    private static void traverseListSym(Set<Long> keys, PointerTargetNodeList pointers, long sourceOffset) {
         for (Object ptn : pointers) {
             long targetOffset = ((PointerTargetNode) ptn).getSynset().getOffset();
             if (sourceOffset != targetOffset) {
@@ -607,7 +502,7 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
         }
     }
 
-    private static void traverseTreeMG(HashSet<Long> keys, PointerTargetTree syn, long sourceOffset) {
+    private static void traverseTreeMG(Set<Long> keys, PointerTargetTree syn, long sourceOffset) {
         for (Object aMGListsList : syn.toList()) {
             for (Object ptn : (PointerTargetNodeList) aMGListsList) {
                 long targetOffset = ((PointerTargetNode) ptn).getSynset().getOffset();
@@ -619,7 +514,7 @@ public class InMemoryWordNetBinaryArray extends Configurable implements ISenseMa
         }
     }
 
-    private static void traverseTree(HashSet<Long> keys, PointerTargetTree syn, long sourceOffset) {
+    private static void traverseTree(Set<Long> keys, PointerTargetTree syn, long sourceOffset) {
         for (Object aMGListsList : syn.toList()) {
             for (Object ptn : (PointerTargetNodeList) aMGListsList) {
                 long targetOffset = ((PointerTargetNode) ptn).getSynset().getOffset();

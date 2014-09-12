@@ -1,8 +1,6 @@
 package it.unitn.disi.smatch.oracles.wordnet;
 
 import it.unitn.disi.common.DISIException;
-import it.unitn.disi.common.components.Configurable;
-import it.unitn.disi.common.components.ConfigurableException;
 import it.unitn.disi.common.utils.MiscUtils;
 import it.unitn.disi.smatch.SMatchException;
 import it.unitn.disi.smatch.data.ling.ISense;
@@ -20,105 +18,91 @@ import net.sf.extjwnl.data.relationship.AsymmetricRelationship;
 import net.sf.extjwnl.data.relationship.RelationshipFinder;
 import net.sf.extjwnl.data.relationship.RelationshipList;
 import net.sf.extjwnl.dictionary.Dictionary;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
  * Implements a Linguistic Oracle and Sense Matcher using WordNet.
- * <p/>
- * Needs  JWNLPropertiesPath string parameter which should point to a JWNL configuration file.
  *
  * @author Mikalai Yatskevich mikalai.yatskevich@comlab.ox.ac.uk
  * @author <a rel="author" href="http://autayeu.com/">Aliaksandr Autayeu</a>
  */
-public class WordNet extends Configurable implements ILinguisticOracle, ISenseMatcher {
+public class WordNet implements ILinguisticOracle, ISenseMatcher {
 
-    private static final Logger log = Logger.getLogger(WordNet.class);
-
-    private static final String JWNL_PROPERTIES_PATH_KEY = "JWNLPropertiesPath";
-
-    private Dictionary dic = null;
-
-    // controls loading of arrays, used to skip loading before conversion
-    private static final String LOAD_ARRAYS_KEY = "loadArrays";
-
-    // contains all the multiwords in WordNet
-    private static final String MULTIWORDS_FILE_KEY = "multiwordsFileName";
-    private HashMap<String, ArrayList<ArrayList<String>>> multiwords = null;
+    private static final Logger log = LoggerFactory.getLogger(WordNet.class);
 
     private static final Pattern offset = Pattern.compile("\\d+");
 
-    private Map<String, Character> sensesCache;
+    private final Dictionary dic;
 
-    public WordNet() {
-        sensesCache = new HashMap<String, Character>();
+    // contains all the multiwords in WordNet
+    private final Map<String, List<List<String>>> multiwords;
+
+    private final Map<String, Character> sensesCache = new ConcurrentHashMap<>();
+
+    public WordNet() throws SMatchException {
+        this(null, null, true);
     }
 
-    @Override
-    public boolean setProperties(Properties newProperties) throws ConfigurableException {
-        boolean result = super.setProperties(newProperties);
-        if (result) {
-            boolean loadArrays = true;
-            if (newProperties.containsKey(LOAD_ARRAYS_KEY)) {
-                loadArrays = Boolean.parseBoolean(newProperties.getProperty(LOAD_ARRAYS_KEY));
+    public WordNet(String jwnlPropertiesPath) throws SMatchException {
+        this(jwnlPropertiesPath, null, true);
+    }
+
+    public WordNet(String jwnlPropertiesPath, String multiwordsFileName) throws SMatchException {
+        this(jwnlPropertiesPath, multiwordsFileName, true);
+    }
+
+    public WordNet(String jwnlPropertiesPath, String multiwordsFileName, boolean loadArrays) throws SMatchException {
+        dic = getDictionary(jwnlPropertiesPath);
+
+        if (null != multiwordsFileName) {
+            if (loadArrays) {
+                log.info("Loading multiwords: " + multiwordsFileName);
+                multiwords = readHash(multiwordsFileName);
+                log.info("loaded multiwords: " + multiwords.size());
+            } else {
+                multiwords = new HashMap<>();
             }
+        } else {
+            // create it
+            multiwords = createMultiwordHash(dic);
+        }
+    }
 
-            try {
-                if (newProperties.containsKey(JWNL_PROPERTIES_PATH_KEY)) {
-                    String configPath = newProperties.getProperty(JWNL_PROPERTIES_PATH_KEY);
-                    log.info("Initializing extJWNL (" + configPath + ")");
+    public static Dictionary getDictionary(String jwnlPropertiesPath) throws SMatchException {
+        try {
+            if (null != jwnlPropertiesPath) {
+                log.info("Initializing extJWNL (" + jwnlPropertiesPath + ")");
 
-                    InputStream is = MiscUtils.getInputStream(configPath);
-                    try {
-                        dic = Dictionary.getInstance(is);
-                    } finally {
-                        if (null != is) {
-                            is.close();
-                        }
+                InputStream is = MiscUtils.getInputStream(jwnlPropertiesPath);
+                try {
+                    return Dictionary.getInstance(is);
+                } finally {
+                    if (null != is) {
+                        is.close();
                     }
-                } else {
-                    log.info("Initializing extJWNL (default resource instance)");
-                    dic = Dictionary.getDefaultResourceInstance();
-                }
-            } catch (JWNLException e) {
-                throw new ConfigurableException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            } catch (DISIException e) {
-                throw new ConfigurableException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            } catch (FileNotFoundException e) {
-                throw new ConfigurableException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            } catch (IOException e) {
-                throw new ConfigurableException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            }
-
-            if (newProperties.containsKey(MULTIWORDS_FILE_KEY)) {
-                if (loadArrays) {
-                    String multiwordFileName = newProperties.getProperty(MULTIWORDS_FILE_KEY);
-                    log.info("Loading multiwords: " + multiwordFileName);
-                    multiwords = readHash(multiwordFileName);
-                    log.info("loaded multiwords: " + multiwords.size());
-                } else {
-                    multiwords = new HashMap<String, ArrayList<ArrayList<String>>>();
                 }
             } else {
-                // create it
-                multiwords = createMultiwordHash(dic);
+                log.info("Initializing extJWNL (default resource instance)");
+                return Dictionary.getDefaultResourceInstance();
             }
-
+        } catch (JWNLException | DISIException | IOException e) {
+            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
         }
-        return result;
     }
 
     public List<ISense> getSenses(String label) throws LinguisticOracleException {
-        List<ISense> result = new ArrayList<ISense>();
+        List<ISense> result = new ArrayList<>();
         try {
             IndexWordSet lemmas = dic.lookupAllIndexWords(label);
             if (null != lemmas && 0 < lemmas.size()) {
-                //Looping on all words in indexWordSet
+                // looping on all words in indexWordSet
                 for (int i = 0; i < lemmas.getIndexWordArray().length; i++) {
                     IndexWord lemma = lemmas.getIndexWordArray()[i];
                     for (int j = 0; j < lemma.getSenses().size(); j++) {
@@ -135,7 +119,7 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
 
     public List<String> getBaseForms(String derivation) throws LinguisticOracleException {
         try {
-            List<String> result = new ArrayList<String>();
+            List<String> result = new ArrayList<>();
             IndexWordSet tmp = dic.lookupAllIndexWords(derivation);
             if (null != tmp) {
                 IndexWord[] indexWordArray = tmp.getIndexWordArray();
@@ -284,9 +268,7 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
                 if (list.size() > 0) {
                     return !((POS.ADJECTIVE == sourceSyn.getPOS()) || (POS.ADJECTIVE == targetSyn.getPOS())) || (list.get(0).getDepth() == 0);
                 }
-            } catch (CloneNotSupportedException e) {
-                throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            } catch (JWNLException e) {
+            } catch (CloneNotSupportedException | JWNLException e) {
                 throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
             }
         }
@@ -308,9 +290,7 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
                         return true;
                     }
                 }
-            } catch (CloneNotSupportedException e) {
-                throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            } catch (JWNLException e) {
+            } catch (CloneNotSupportedException | JWNLException e) {
                 throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
             }
         }
@@ -364,9 +344,7 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
                     } else {
                         return true;
                     }
-                } catch (CloneNotSupportedException e) {
-                    throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-                } catch (JWNLException e) {
+                } catch (CloneNotSupportedException | JWNLException e) {
                     throw new SenseMatcherException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
                 }
             }
@@ -386,7 +364,7 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
         }
     }
 
-    public ArrayList<ArrayList<String>> getMultiwords(String beginning) throws LinguisticOracleException {
+    public List<List<String>> getMultiwords(String beginning) throws LinguisticOracleException {
         return multiwords.get(beginning);
     }
 
@@ -447,9 +425,9 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
      * @throws SMatchException SMatchException
      */
     @SuppressWarnings("unchecked")
-    private static HashMap<String, ArrayList<ArrayList<String>>> readHash(String url) throws SMatchException {
+    private static Map<String, List<List<String>>> readHash(String url) throws SMatchException {
         try {
-            return (HashMap<String, ArrayList<ArrayList<String>>>) MiscUtils.readObject(url);
+            return (Map<String, List<List<String>>>) MiscUtils.readObject(url);
         } catch (DISIException e) {
             throw new SMatchException(e.getMessage(), e);
         }
@@ -458,49 +436,21 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
     /**
      * Create caches of WordNet to speed up matching.
      *
-     * @param componentKey a key to the component in the configuration
-     * @param properties   configuration
+     * @param jwnlPropertiesPath path to extJWNL config file
+     * @param multiwordsFileName path to file with multiwords
      * @throws SMatchException SMatchException
      */
-    public static void createWordNetCaches(String componentKey, Properties properties) throws SMatchException {
-        properties = getComponentProperties(makeComponentPrefix(componentKey, WordNet.class.getSimpleName()), properties);
-
-        Dictionary dic;
-        try {
-            if (properties.containsKey(JWNL_PROPERTIES_PATH_KEY)) {
-                String configPath = properties.getProperty(JWNL_PROPERTIES_PATH_KEY);
-                log.info("Initializing extJWNL (" + configPath + ")");
-
-                InputStream is = MiscUtils.getInputStream(configPath);
-                try {
-                    dic = Dictionary.getInstance(is);
-                } finally {
-                    if (null != is) {
-                        is.close();
-                    }
-                }
-            } else {
-                log.info("Initializing extJWNL (default resource instance)");
-                dic = Dictionary.getDefaultResourceInstance();
-            }
-        } catch (JWNLException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (DISIException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (FileNotFoundException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        } catch (IOException e) {
-            throw new SMatchException(e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        }
+    public static void createWordNetCaches(String jwnlPropertiesPath, String multiwordsFileName) throws SMatchException {
+        Dictionary dic = getDictionary(jwnlPropertiesPath);
 
         log.info("Creating WordNet caches...");
-        writeMultiwords(dic, properties);
+        writeMultiwords(dic, multiwordsFileName);
         log.info("Done");
     }
 
-    private static HashMap<String, ArrayList<ArrayList<String>>> createMultiwordHash(Dictionary dic) throws SMatchException {
+    private static Map<String, List<List<String>>> createMultiwordHash(Dictionary dic) throws SMatchException {
         log.info("Creating multiword hash...");
-        HashMap<String, ArrayList<ArrayList<String>>> result = new HashMap<String, ArrayList<ArrayList<String>>>();
+        Map<String, List<List<String>>> result = new HashMap<>();
         POS[] parts = new POS[]{POS.NOUN, POS.ADJECTIVE, POS.VERB, POS.ADVERB};
         for (POS pos : parts) {
             collectMultiwords(dic, result, pos);
@@ -509,15 +459,15 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
         return result;
     }
 
-    private static void writeMultiwords(Dictionary dic, Properties properties) throws SMatchException {
+    private static void writeMultiwords(Dictionary dic, String multiwordsFileName) throws SMatchException {
         try {
-            MiscUtils.writeObject(createMultiwordHash(dic), properties.getProperty(MULTIWORDS_FILE_KEY));
+            MiscUtils.writeObject(createMultiwordHash(dic), multiwordsFileName);
         } catch (DISIException e) {
             throw new SMatchException(e.getMessage(), e);
         }
     }
 
-    private static void collectMultiwords(Dictionary dic, HashMap<String, ArrayList<ArrayList<String>>> multiwords, POS pos) throws SMatchException {
+    private static void collectMultiwords(Dictionary dic, Map<String, List<List<String>>> multiwords, POS pos) throws SMatchException {
         try {
             int count = 0;
             Iterator i = dic.getIndexWordIterator(pos);
@@ -527,14 +477,14 @@ public class WordNet extends Configurable implements ILinguisticOracle, ISenseMa
                 if (-1 < lemma.indexOf(' ')) {
                     count++;
                     if (0 == count % 10000) {
-                        log.info(count);
+                        log.debug("multiwords: " + count);
                     }
                     String[] tokens = lemma.split(" ");
-                    ArrayList<ArrayList<String>> mwEnds = multiwords.get(tokens[0]);
+                    List<List<String>> mwEnds = multiwords.get(tokens[0]);
                     if (null == mwEnds) {
-                        mwEnds = new ArrayList<ArrayList<String>>();
+                        mwEnds = new ArrayList<>();
                     }
-                    ArrayList<String> currentMWEnd = new ArrayList<String>(Arrays.asList(tokens));
+                    List<String> currentMWEnd = new ArrayList<>(Arrays.asList(tokens));
                     currentMWEnd.remove(0);
                     mwEnds.add(currentMWEnd);
                     multiwords.put(tokens[0], mwEnds);
