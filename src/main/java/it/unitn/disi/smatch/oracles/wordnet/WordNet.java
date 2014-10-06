@@ -358,6 +358,9 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
         }
         try {
             Synset synset = dic.getSynsetAt(POS.getPOSForKey(id.substring(0, 1)), Long.parseLong(id.substring(2)));
+            if (null == synset) {
+                throw new LinguisticOracleException("Synset not found: " + id);
+            }
             return new WordNetSense(synset);
         } catch (JWNLException e) {
             throw new LinguisticOracleException(e.getMessage(), e);

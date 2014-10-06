@@ -11,6 +11,7 @@ import net.sf.extjwnl.data.list.PointerTargetNode;
 import net.sf.extjwnl.data.list.PointerTargetNodeList;
 import net.sf.extjwnl.data.list.PointerTargetTree;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -21,7 +22,7 @@ import java.util.List;
  * @author Mikalai Yatskevich mikalai.yatskevich@comlab.ox.ac.uk
  * @author <a rel="author" href="http://autayeu.com/">Aliaksandr Autayeu</a>
  */
-public class WordNetSense extends Sense {
+public class WordNetSense extends Sense implements Serializable {
 
     private final Synset synset;
 
@@ -56,7 +57,6 @@ public class WordNetSense extends Sense {
     public List<ISense> getParents(int depth) throws LinguisticOracleException {
         List<ISense> out = new ArrayList<>();
         try {
-            // TODO check the casts
             PointerTargetTree hypernyms = PointerUtils.getHypernymTree(synset, depth);
             for (Iterator itr = hypernyms.toList().iterator(); itr.hasNext(); ) {
                 if (itr.hasNext()) {
@@ -81,7 +81,6 @@ public class WordNetSense extends Sense {
     public List<ISense> getChildren(int depth) throws LinguisticOracleException {
         List<ISense> out = new ArrayList<>();
         try {
-            // TODO check the casts
             PointerTargetTree hypernyms = PointerUtils.getHyponymTree(synset, depth);
             for (Iterator itr = hypernyms.toList().iterator(); itr.hasNext(); ) {
                 if (itr.hasNext()) {
