@@ -98,16 +98,17 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
     }
 
     public List<ISense> getSenses(String label) throws LinguisticOracleException {
-        List<ISense> result = new ArrayList<>();
+        List<ISense> result = Collections.emptyList();
         try {
             IndexWordSet lemmas = dic.lookupAllIndexWords(label);
             if (null != lemmas && 0 < lemmas.size()) {
-                // looping on all words in indexWordSet
-                for (int i = 0; i < lemmas.getIndexWordArray().length; i++) {
-                    IndexWord lemma = lemmas.getIndexWordArray()[i];
-                    for (int j = 0; j < lemma.getSenses().size(); j++) {
-                        Synset synset = lemma.getSenses().get(j);
-                        result.add(new WordNetSense(synset));
+                result = new ArrayList<>(lemmas.size());
+                for (POS pos : POS.values()) {
+                    IndexWord indexWord = lemmas.getIndexWord(pos);
+                    if (null != indexWord) {
+                        for (Synset synset : indexWord.getSenses()) {
+                            result.add(new WordNetSense(synset));
+                        }
                     }
                 }
             }
