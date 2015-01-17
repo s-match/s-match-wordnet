@@ -103,16 +103,19 @@ public class InMemoryWordNetBinaryArray implements ISenseMatcher {
 
         if ((POS.NOUN == sourcePOS) && (POS.NOUN == targetPOS)) {
             if (Arrays.binarySearch(noun_opp, key) >= 0) {
+                log.trace("Found ! using ! (ANTONYM) between nouns");
                 return true;
             }
         } else {
             if ((POS.ADJECTIVE == sourcePOS) && (POS.ADJECTIVE == targetPOS)) {
                 if (Arrays.binarySearch(adj_opp, key) >= 0) {
+                    log.trace("Found ! using ! (ANTONYM) between adjectives");
                     return true;
                 }
             } else {
                 if ((POS.ADVERB == sourcePOS) && (POS.ADVERB == targetPOS)) {
                     if (Arrays.binarySearch(adv_opp, key) >= 0) {
+                        log.trace("Found ! using ! (ANTONYM) between adverbs");
                         return true;
                     }
                 }
@@ -126,11 +129,13 @@ public class InMemoryWordNetBinaryArray implements ISenseMatcher {
         long key = (sourceSense << 32) + targetSense;
         if ((POS.NOUN == sourcePOS) && (POS.NOUN == targetPOS)) {
             if (Arrays.binarySearch(noun_mg, key) >= 0) {
+                log.trace("Found < using @,#m,#s,#p (HYPERNYM, MEMBER_, SUBSTANCE_, PART_HOLONYM) between nouns");
                 return true;
             }
         } else {
             if ((POS.VERB == sourcePOS) && (POS.VERB == targetPOS)) {
                 if (Arrays.binarySearch(verb_mg, key) >= 0) {
+                    log.trace("Found < using @ (HYPERNYM) between verbs");
                     return true;
                 }
             }
@@ -153,18 +158,21 @@ public class InMemoryWordNetBinaryArray implements ISenseMatcher {
 
         if ((POS.ADJECTIVE == sourcePOS) && (POS.ADJECTIVE == targetPOS)) {
             if (Arrays.binarySearch(adj_syn, key) >= 0) {
+                log.trace("Found = using & (SIMILAR_TO) between adjectives");
                 return true;
             }
         }
         if ((POS.NOUN == sourcePOS) && (POS.VERB == targetPOS)) {
             key = (targetSense << 32) + sourceSense;
             if (Arrays.binarySearch(nominalizations, key) >= 0) {
+                log.trace("Found = using + (DERIVATION) between a noun and a verb");
                 return true;
             }
         }
         if ((POS.VERB == sourcePOS) && (POS.NOUN == targetPOS)) {
             key = (sourceSense << 32) + targetSense;
             if (Arrays.binarySearch(nominalizations, key) >= 0) {
+                log.trace("Found = using + (DERIVATION) between a verb and a noun");
                 return true;
             }
         }

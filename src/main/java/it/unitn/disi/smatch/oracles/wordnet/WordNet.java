@@ -178,6 +178,12 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
         for (ISense sourceSense : sourceSenses) {
             for (ISense targetSense : targetSenses) {
                 if (getRelationFromOracle(sourceSense, targetSense, IMappingElement.EQUIVALENCE)) {
+                    if (log.isTraceEnabled()) {
+                        log.trace("Found = using & (SIMILAR_TO) between " +
+                                        sourceSense.getId() + Arrays.toString(sourceSense.getLemmas().toArray()) + " and " +
+                                        targetSense.getId() + Arrays.toString(targetSense.getLemmas().toArray())
+                        );
+                    }
                     return IMappingElement.EQUIVALENCE;
                 }
             }
@@ -186,6 +192,12 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
         for (ISense sourceSense : sourceSenses) {
             for (ISense targetSense : targetSenses) {
                 if (getRelationFromOracle(sourceSense, targetSense, IMappingElement.LESS_GENERAL)) {
+                    if (log.isTraceEnabled()) {
+                        log.trace("Found < using @,#m,#s,#p (HYPERNYM, MEMBER_, SUBSTANCE_, PART_HOLONYM) between " +
+                                        sourceSense.getId() + Arrays.toString(sourceSense.getLemmas().toArray()) + " and " +
+                                        targetSense.getId() + Arrays.toString(targetSense.getLemmas().toArray())
+                        );
+                    }
                     return IMappingElement.LESS_GENERAL;
                 }
             }
@@ -194,6 +206,12 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
         for (ISense sourceSense : sourceSenses) {
             for (ISense targetSense : targetSenses) {
                 if (getRelationFromOracle(sourceSense, targetSense, IMappingElement.MORE_GENERAL)) {
+                    if (log.isTraceEnabled()) {
+                        log.trace("Found > using @,#m,#s,#p (HYPERNYM, MEMBER_, SUBSTANCE_, PART_HOLONYM) between " +
+                                        sourceSense.getId() + Arrays.toString(sourceSense.getLemmas().toArray()) + " and " +
+                                        targetSense.getId() + Arrays.toString(targetSense.getLemmas().toArray())
+                        );
+                    }
                     return IMappingElement.MORE_GENERAL;
                 }
             }
@@ -202,6 +220,12 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
         for (ISense sourceSense : sourceSenses) {
             for (ISense targetSense : targetSenses) {
                 if (getRelationFromOracle(sourceSense, targetSense, IMappingElement.DISJOINT)) {
+                    if (log.isTraceEnabled()) {
+                        log.trace("Found ! using ! (ANTONYM) between " +
+                                        sourceSense.getId() + Arrays.toString(sourceSense.getLemmas().toArray()) + " and " +
+                                        targetSense.getId() + Arrays.toString(targetSense.getLemmas().toArray())
+                        );
+                    }
                     return IMappingElement.DISJOINT;
                 }
             }
@@ -221,7 +245,7 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
      * @throws it.unitn.disi.smatch.oracles.SenseMatcherException SenseMatcherException
      */
     private boolean getRelationFromOracle(ISense source, ISense target, char rel) throws SenseMatcherException {
-        final String sensePairKey = source.toString() + target.toString();
+        final String sensePairKey = source.toString() + "\t" + target.toString();
         Character cachedRelation = sensesCache.get(sensePairKey);
         // if we don't have cached relation check which one exist and put it to cash
         if (null == cachedRelation) {
@@ -246,7 +270,7 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
                             return rel == IMappingElement.MORE_GENERAL;
                         } else {
                             sensesCache.put(sensePairKey, IMappingElement.IDK);
-                            return false;
+                            return IMappingElement.IDK == rel;
                         }
                     }
                 }
@@ -354,11 +378,16 @@ public class WordNet implements ILinguisticOracle, ISenseMatcher {
     }
 
     public ISense createSense(String id) throws LinguisticOracleException {
-        if (id.length() < 3 || 1 != id.indexOf('#') || !"navr".contains(id.substring(0, 1)) || !offset.matcher(id.substring(2)).matches()) {
+        if (id.length() < 3 || 1 != id.indexOf('#')) {
+            throw new LinguisticOracleException("Malformed sense id: " + id);
+        }
+        final String pos = id.substring(0, 1);
+        final String off = id.substring(2);
+        if (!"navr".contains(pos) || !offset.matcher(off).matches()) {
             throw new LinguisticOracleException("Malformed sense id: " + id);
         }
         try {
-            Synset synset = dic.getSynsetAt(POS.getPOSForKey(id.substring(0, 1)), Long.parseLong(id.substring(2)));
+            Synset synset = dic.getSynsetAt(POS.getPOSForKey(pos), Long.parseLong(off));
             if (null == synset) {
                 throw new LinguisticOracleException("Synset not found: " + id);
             }
